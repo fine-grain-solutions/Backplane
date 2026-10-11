@@ -27,6 +27,8 @@ curl -fsSL https://github.com/BackplaneWorks/Backplane/releases/latest/download/
 backplane
 ```
 
+Nix and NixOS installs are in [nix/README.md](nix/README.md).
+
 Linux (x64, arm64) also has a `.deb` and an AppImage on the [latest release](https://github.com/BackplaneWorks/Backplane/releases/latest).
 
 **macOS (Apple silicon).** Use the same one-liner, or download `backplane-v<version>-darwin-arm64.tar.gz`. Builds are **not notarized yet**: if macOS refuses to open the app, right-click (or Control-click) it in Finder → Open → Open, or on macOS 15+ use System Settings → Privacy & Security → "Open Anyway", or run `xattr -dr com.apple.quarantine /Applications/Backplane.app`.
