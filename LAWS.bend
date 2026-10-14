@@ -150,6 +150,7 @@ import ./src/core/hier.bend as HI
 import ./src/core/boot.bend as BT
 import ./src/core/store.bend as ST
 import ./src/core/sign.bend as SG
+import ./src/core/wnote.bend as WN
 import ./src/core/ring.bend as RG
 import ./src/core/cron.bend as CR
 import ./src/core/space.bend as SPC
@@ -12189,3 +12190,66 @@ law sidebar_draft_settings_separate:
   for view: String
   for revision: Nat
   {CHATSIDE.SidebarImage.key.input(True{}, u, epoch, view, revision) == "" : String}
+# Turn-end webhook (core/wnote.bend)
+# -----------------------------------
+# push.webhook.url posts a JSON notice from Push.turn_ended. Unset, or not
+# an http(s) address, nothing is sent. A secret is optional: missing when
+# one was configured posts nothing (never an unsigned notice instead), and
+# a stop is reported as "stopped".
+
+law hook_off_unset:
+  {WN.Wn.on("") == False{} : Bool}
+
+law hook_on_set:
+  {WN.Wn.on("https://example.com/hook") == True{} : Bool}
+
+law hook_url_https:
+  {WN.Wn.url.ok("https://example.com/hook") == True{} : Bool}
+
+law hook_url_file:
+  {WN.Wn.url.ok("file:///etc/passwd") == False{} : Bool}
+
+law hook_url_space:
+  {WN.Wn.url.ok("https://example.com/a b") == False{} : Bool}
+
+law hook_live_blank:
+  {WN.Wn.live("  ") == False{} : Bool}
+
+law hook_mode_unsigned:
+  {WN.Wn.mode(False{}, "") == 1n : Nat}
+
+law hook_mode_default_file:
+  {WN.Wn.mode(False{}, "s") == 2n : Nat}
+
+law hook_mode_missing:
+  {WN.Wn.mode(True{}, "") == 0n : Nat}
+
+law hook_mode_configured:
+  {WN.Wn.mode(True{}, "s") == 2n : Nat}
+
+law hook_stopped_word:
+  {WN.Wn.outcome(M.Interrupted{}) == "stopped" : String}
+
+law hook_failed_word:
+  {WN.Wn.outcome(M.Failed{}) == "failed" : String}
+
+law hook_completed_word:
+  {WN.Wn.outcome(M.Completed{}) == "completed" : String}
+
+law hook_body_state:
+  {J.Json.get_str(Maybe.default(&2, J.Json, J.Json.parse(WN.Wn.body("t1", "failed", "Board", "Failed")), J.Null{}), "state", "") == "failed" : String}
+
+law hook_body_event:
+  {J.Json.get_str(Maybe.default(&2, J.Json, J.Json.parse(WN.Wn.body("t1", "completed", "A", "ok")), J.Null{}), "event", "") == "turn.ended" : String}
+
+law hook_unsigned_header:
+  {List.length(&2, String, WN.Wn.headers("", 1n, "{}")) == 1n : Nat}
+
+law hook_signed_header:
+  {List.length(&2, String, WN.Wn.headers("s", 1n, "{}")) == 3n : Nat}
+
+law hook_secret_default:
+  {WN.Wn.path("/h", "") == "/h/secrets/push.webhook" : String}
+
+law hook_secret_path:
+  {WN.Wn.path("/h", "/tmp/s") == "/tmp/s" : String}

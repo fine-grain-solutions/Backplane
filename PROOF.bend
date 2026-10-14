@@ -13184,3 +13184,59 @@ def Laws.sidebar_draft_scratch_input(key, value, rest, h):
   SIDEDRAFTPROOF.scratch_keep(key, value, rest, h)
 def Laws.sidebar_draft_settings_separate(u, epoch, view, revision):
   SIDEDRAFTPROOF.settings_separate(u, epoch, view, revision)
+def Laws.hook_off_unset():
+  {==}
+
+def Laws.hook_on_set():
+  {==}
+
+def Laws.hook_url_https():
+  {==}
+
+def Laws.hook_url_file():
+  {==}
+
+def Laws.hook_url_space():
+  {==}
+
+def Laws.hook_live_blank():
+  {==}
+
+def Laws.hook_mode_unsigned():
+  {==}
+
+def Laws.hook_mode_default_file():
+  {==}
+
+def Laws.hook_mode_missing():
+  {==}
+
+def Laws.hook_mode_configured():
+  {==}
+
+def Laws.hook_stopped_word():
+  {==}
+
+def Laws.hook_failed_word():
+  {==}
+
+def Laws.hook_completed_word():
+  {==}
+
+def Laws.hook_body_state():
+  {==}
+
+def Laws.hook_body_event():
+  {==}
+
+def Laws.hook_unsigned_header():
+  {==}
+
+def Laws.hook_signed_header():
+  {==}
+
+def Laws.hook_secret_default():
+  {==}
+
+def Laws.hook_secret_path():
+  {==}
