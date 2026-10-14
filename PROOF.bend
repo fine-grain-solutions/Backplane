@@ -13240,3 +13240,12 @@ def Laws.hook_secret_default():
 
 def Laws.hook_secret_path():
   {==}
+
+def Laws.hook_report_keeps_end():
+  {==}
+
+def Laws.hook_report_keeps_fail():
+  {==}
+
+def Laws.hook_report_fallback():
+  {==}
