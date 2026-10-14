@@ -13360,4 +13360,11 @@ def Laws.life_fresh_child_wakes():
   {==}
 
 def Laws.life_later_manual_settle_held():
+def Laws.hook_report_keeps_end():
+  {==}
+
+def Laws.hook_report_keeps_fail():
+  {==}
+
+def Laws.hook_report_fallback():
   {==}
