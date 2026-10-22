@@ -180,9 +180,15 @@ in
       git init -q
 
       mkdir -p "$XDG_CACHE_HOME/backplane-bend/kistack-src"
-      tar -C "$(dirname ${kistackSrc})" -czf \
+      # Store paths are mode 0555. build-kistack.sh extracts this tarball
+      # and removes the work tree on the way out, which fails on those modes.
+      kistackStage=$TMPDIR/kistack-stage
+      mkdir -p "$kistackStage"
+      cp -a ${kistackSrc} "$kistackStage/src"
+      chmod -R u+w "$kistackStage/src"
+      tar -C "$kistackStage" -czf \
         "$XDG_CACHE_HOME/backplane-bend/kistack-src/${sources.kistackRevision}.tar.gz" \
-        "$(basename ${kistackSrc})"
+        src
 
       export BEND_SOURCE_ARCHIVE=${bendArchive}
       python3 ${prepareCompiler}
