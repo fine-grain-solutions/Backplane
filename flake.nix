@@ -1,5 +1,5 @@
 {
-  description = "Backplane, packaged from the official Linux release";
+  description = "Backplane: the official Linux release, and a from-source build of this checkout";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
 
@@ -21,12 +21,25 @@
   in {
     overlays.default = final: _prev: {
       backplane = final.callPackage ./nix/package.nix {};
+      bend = final.callPackage ./nix/bend.nix {};
+      # This checkout, not the release tarball. x86_64-linux.
+      backplane-src = final.callPackage ./nix/package-src.nix {
+        src = self;
+        version = "0.0.0-src.${self.shortRev or self.dirtyShortRev or "dirty"}";
+        commit = self.rev or "";
+      };
     };
 
-    packages = forAllSystems (pkgs: {
-      default = pkgs.backplane;
-      inherit (pkgs) backplane;
-    });
+    packages = forAllSystems (
+      pkgs:
+        {
+          default = pkgs.backplane;
+          inherit (pkgs) backplane;
+        }
+        // nixpkgs.lib.optionalAttrs (pkgs.stdenv.hostPlatform.system == "x86_64-linux") {
+          inherit (pkgs) backplane-src bend;
+        }
+    );
 
     apps = forAllSystems (pkgs: {
       default = {
