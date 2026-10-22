@@ -1,6 +1,12 @@
 # Nix / NixOS
 
-The flake packages the official Linux release binaries (`x86_64-linux` and `aarch64-linux`) from [i2cjak/Backplane](https://github.com/i2cjak/Backplane). It does not compile Backplane. nixpkgs is pinned to `nixos-26.05`. `packages.default` is `backplane`; `overlays.default` adds that package; `apps.default` runs it; `nix fmt` is alejandra.
+The flake packages the official Linux release binaries (`x86_64-linux` and `aarch64-linux`) from [i2cjak/Backplane](https://github.com/i2cjak/Backplane). nixpkgs is pinned to `nixos-26.05`. `packages.default` is `backplane` (that tarball). `overlays.default` adds it, plus `backplane-src` and `bend` on `x86_64-linux`. `apps.default` runs the release binary. `nix fmt` is alejandra.
+
+`backplane-src` compiles this checkout with `scripts/build.sh`: `backplane` (the launcher), `backplane-serve`, `web/`, and `kistack/` under `libexec/backplane`, and `backplane-kipc`. KiStack is the same `fetchFromGitHub` pin as the release package (`nix/sources.nix`, from `deploy/kistack.lock`). Bend is 2.0.36 on a baseline Bun, so the compiler runs on CPUs without AVX2. Google sign-in is not baked in. `backplane-browser` and `backplane-step2glb` are not built.
+
+```sh
+nix build .#backplane-src
+```
 
 ```sh
 nix run .          # the window binary; a hub starts with it
@@ -25,6 +31,10 @@ A NixOS configuration:
         ({ pkgs, ... }: {
           services.backplane = {
             enable = true;
+            # "release" (default) is pkgs.backplane, the pinned tarball.
+            # "source" is pkgs.backplane-src, this checkout (x86_64-linux).
+            # Setting `package` directly overrides `variant`.
+            variant = "release";
             # Loopback unless you mean to publish the hub.
             host = "127.0.0.1";
             port = 3787;
