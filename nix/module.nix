@@ -95,16 +95,37 @@ in {
   options.services.backplane = {
     enable = lib.mkEnableOption "the Backplane hub";
 
+    variant = lib.mkOption {
+      type = lib.types.enum ["release" "source"];
+      default = "release";
+      description = ''
+        Which package to run when `package` is left unset.
+        `release` is the pinned upstream Linux tarball (`pkgs.backplane`).
+        `source` builds this checkout (`pkgs.backplane-src`, x86_64-linux).
+        An explicit `package` overrides this choice.
+      '';
+    };
+
     package = lib.mkOption {
       type = lib.types.package;
       default =
-        if pkgs ? backplane
+        if cfg.variant == "source"
+        then
+          if pkgs ? backplane-src
+          then pkgs.backplane-src
+          else throw "services.backplane.variant = \"source\" needs the Backplane overlay (pkgs.backplane-src)"
+        else if pkgs ? backplane
         then pkgs.backplane
         else pkgs.callPackage ./package.nix {};
-      defaultText = lib.literalExpression "pkgs.backplane";
+      defaultText = lib.literalExpression ''
+        if variant == "source" then pkgs.backplane-src else pkgs.backplane
+      '';
       description = ''
-        Package that provides bin/backplane, bin/backplane-serve and
-        libexec/backplane/web. The service runs backplane-serve.
+        Package that provides bin/backplane, bin/backplane-serve,
+        libexec/backplane/web and libexec/backplane/kistack.
+        The overlay's `backplane` is the release tarball and `backplane-src`
+        is this checkout built from source. `variant` selects which one
+        this default uses. The service runs backplane-serve.
       '';
     };
 
@@ -296,6 +317,10 @@ in {
 
   config = lib.mkIf cfg.enable {
     assertions = [
+      {
+        assertion = cfg.variant != "source" || pkgs.stdenv.hostPlatform.system == "x86_64-linux";
+        message = "services.backplane.variant = \"source\" needs x86_64-linux (pkgs.backplane-src).";
+      }
       {
         assertion = builtins.length storeSecrets == 0;
         message = "services.backplane refuses secret paths in /nix/store: ${lib.concatStringsSep ", " storeSecrets}";
