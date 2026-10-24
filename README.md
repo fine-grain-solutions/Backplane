@@ -19,6 +19,8 @@ curl -fsSL https://github.com/i2cjak/backplane-bend/releases/latest/download/ins
 backplane
 ```
 
+Nix and NixOS installs are in [nix/README.md](nix/README.md).
+
 <h2>Providers Supported</h2>
 
 <p align="center">
