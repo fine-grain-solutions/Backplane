@@ -268,6 +268,65 @@ browser's notifications (the page asks for permission on the first click or
 key; macOS, Windows, Linux) or `notify-send` from the Linux window.
 Clicking it opens the thread.
 
+### Webhook
+
+`push.webhook.url` (a setting: an `http` or `https` address) makes the hub
+POST a JSON notice for each alert **Notify me for** would raise. Settings,
+on the Threads page, has the address and the path of the secret file
+(empty turns the webhook off; an address that is not http or https is
+refused; the secret's contents are never shown). The same
+record decides it (`Policy.loud` / `Policy.kind` in `src/core/notice.bend`):
+a kind of `done` or `fail` goes out from `TurnEnded`, and a kind of `ask`,
+`merged`, `reminder` or `note` goes out from `Alerted`. A quiet settle (an
+empty kind: a stop, an intermediate end, a routine, a launched report, or a
+channel switched off) posts nothing. A desk that holds the phone push does
+not hold the webhook. Unset, nothing is sent and nothing else changes.
+
+A turn that breaks always goes out as a failure while **Settled**
+(`notify.settled`) is on, even when the policy keeps it quiet (a turn no
+fresh message started, a bot's or a queued one): a turn that failed (an
+error, a usage limit) or one the agent cut off (`state` `interrupted`)
+posts `turn.ended` with kind `fail`. A Stop the person asked for stays
+quiet.
+
+```
+{"event":"turn.ended","kind":"done","thread":"…","state":"completed","reason":"","title":"…","text":"…"}
+{"event":"turn.ended","kind":"fail","thread":"…","state":"failed","reason":"limit","title":"…","text":"Claude AI usage limit reached…"}
+```
+
+`event` is `turn.ended` for a settle or a failure, and otherwise the kind
+itself (`ask`, `merged`, `reminder`, `note`). `kind` is that alert's kind.
+`state` for a turn end is the word the turn ended with: `completed`,
+`failed`, `interrupted`, or `stopped`. `reason` says why a broken turn
+ended: `limit` (a usage, rate or quota limit), `error` (any other
+failure) or `interrupted`; it is empty otherwise. A message already waiting does not replace it when
+it starts the next turn. For the other alerts, `state` is the thread's turn
+at the time (`running`, `idle`, …). `text` for a settle or a failure is
+the first line of the error the turn logged, else `Failed`, or the first
+line of the last reply; for the others it is the
+record's own text (the ask, the merge url, the reminder, the note). A POST
+that fails is logged (`backplane: push webhook -> …`) and does not affect
+the turn. With `notify.all` on, a room exchange the older rule alerts is a
+`done` or `fail` and goes out as `turn.ended` too.
+
+The notice is signed when a secret is configured. `push.webhook.secret` is
+the path of a file that holds it (only the path is a setting, as with
+`push.apns.key`). With that unset, `<home>/secrets/push.webhook` is used
+when the file exists. The request then carries the same headers a signed
+webhook in does (`src/core/sign.bend`):
+
+```
+X-Backplane-Timestamp: <unix seconds>
+X-Backplane-Signature: sha256=<hex HMAC-SHA256(secret, timestamp + "." + body)>
+```
+
+A secret of 64 hex digits is the raw 32 bytes; any other text is the key as
+written. With no secret the notice is still posted, without those headers.
+A secret path that cannot be read is logged and nothing is posted, so an
+unsigned notice is never sent in place of a signed one. The address, the
+body and the signature go to `curl` in a config file, never on its command
+line.
+
 ## Already told
 
 A record of what the person has actually been told, so a bot's digest, a

@@ -6,6 +6,7 @@ import ../core/sha1.bend as S
 import ../core/utf8.bend as U
 import ../core/notice.bend as NO
 import ../core/desk.bend as DK
+import ../core/wnote.bend as WN
 import ./host.bend as H
 import ./proc.bend as P
 
@@ -22,6 +23,15 @@ import ./proc.bend as P
 # `openssl` and sends it with `curl`, both host tools. Device tokens and
 # the signed token go to curl in a config file (-K), never on its command
 # line, and never into a log.
+#
+# push.webhook.url, when set to an http(s) address, also POSTs a JSON
+# notice for each alert Notify me for would raise (core/wnote.bend):
+# a settle or a failure from TurnEnded, and an ask, a merge, a reminder
+# or a note from Alerted. A desk holding the phone push does not hold
+# the webhook. Unset, that does nothing. An optional secret
+# (push.webhook.secret, a path, or <home>/secrets/push.webhook)
+# signs it; a POST that fails is logged and does not change what this
+# returns.
 
 # Files
 # -----
@@ -574,9 +584,148 @@ def Push.island.beat.k(due: Bool, st: M.State) -> Bool:
 def Push.island.beat(+st: M.State, +now: Nat) -> Bool:
   Push.island.beat.k(Nat.is_lt(Nat.mod(now, 3600n), 90n), st)
 
-# the island push for a turn that ended; answers the tokens APNs reported dead
-def Push.turn_ended.dead(+home: String, +st: M.State, +thread: String) -> IO(List<&2, String>):
-  Push.start(home, st, thread, M.Setting.get(st, "push.apns.key", ""), M.Setting.get(st, "push.apns.keyid", ""), M.Setting.get(st, "push.apns.team", ""))
+# Webhook
+# -------
+# push.webhook.url posts one JSON notice per alert the notification
+# policy raises. The URL, the body and the signature stay in a 0600 curl
+# config, as the APNs push does. A missing curl, a refused address or a
+# dead endpoint is logged; the dead-token list is still returned.
+
+def Push.hook.kind(+st: M.State, +thread: String) -> String:
+  NO.Alert.kind(NO.Alert.get(st, thread))
+
+def Push.hook.word(+st: M.State, +thread: String, +state: String) -> String:
+  WN.Wn.report(state, M.Thread.turn(B.Hub.thread(st, thread)))
+
+def Push.hook.text(+st: M.State, +thread: String, +state: String) -> String:
+  Push.body(String.eq(state, "failed"), Push.first(B.Task.last(st, thread)))
+
+# a settle or a failure uses the last reply; any other alert uses the record's text
+def Push.hook.line(ended: Bool, +st: M.State, +thread: String, +state: String) -> String:
+  match ended:
+    case True{}:
+      Push.hook.text(st, thread, state)
+    case False{}:
+      Push.alert.body(st, thread, NO.Alert.get(st, thread))
+
+# the newest error the thread logged (an Act of tone "error": a failed
+# result's text, an exit), "" when none
+def Push.hook.err(es: List<&2, M.Entry>, +thread: String) -> String:
+  match es:
+    case Nil{}:
+      ""
+    case M.Act{_, +th, +tone, _, +summary, _} <> t:
+      Bool.pick(String, Bool.and(String.eq(th, thread), String.eq(tone, "error")), summary, Push.hook.err(t, thread))
+    case _ <> t:
+      Push.hook.err(t, thread)
+
+# a broken turn (failed, interrupted) says its error when it logged one
+def Push.hook.said(broke: Bool, +err: String, +line: String) -> String:
+  Bool.pick(String, Bool.and(broke, Bool.not(String.is_empty(err))), Push.first(err), line)
+
+def Push.hook.note.e(+err: String, +kind: String, +st: M.State, +thread: String, +state: String) -> String:
+  WN.Wn.body.r(kind, thread, state, WN.Wn.reason(state, err ++ "\n" ++ B.Task.last(st, thread)), Push.title(B.Hub.thread(st, thread)),
+    Push.hook.said(WN.Wn.broke(state), err, Push.hook.line(WN.Wn.ended(kind), st, thread, state)))
+
+def Push.hook.note(+kind: String, +st: M.State, +thread: String, +state: String) -> String:
+  Push.hook.note.e(Push.hook.err(M.State.mine(st, thread), thread), kind, st, thread, state)
+
+def Push.hook.read(+path: String) -> IO(String):
+  do IO<String>:
+    bs : List<&2, U32> <- Push.read(path)
+    return String.trim(U.Utf8.decode(bs))
+
+def Push.hook.post(+home: String, +st: M.State, +thread: String, +kind: String, +state: String, +url: String, +secret: String) -> IO(Unit):
+  do IO<Unit>:
+    +dir : String = home ++ "/tmp"
+    mk : Result<&1, &1, U32 & String, Unit> <- H.FS.mkdirs(dir)
+    m : Result<&1, &1, U32 & String, Unit> <- H.FS.chmod(dir, 448)
+    t : U32 <- H.Clock.epoch()
+    +now : Nat = U32.to_nat(t)
+    +word : String = Push.hook.word(st, thread, state)
+    +body : String = Push.hook.note(kind, st, thread, word)
+    +name : String = "hook-" ++ Nat.show(now) ++ "-" ++ WN.Wn.safe(thread)
+    +file : String = dir ++ "/" ++ name ++ ".json"
+    +out : String = dir ++ "/" ++ name ++ ".out"
+    +cfg : String = dir ++ "/" ++ name ++ ".curl"
+    Push.write(file, body)
+    Push.write(cfg, Curl.config(url, WN.Wn.headers(secret, now, body), file, out))
+    r : P.Ran <- P.Proc.run("curl", ["-sS", "--proto", "=http,https", "--max-redirs", "0", "--max-time", "15", "-X", "POST", "-K", cfg], dir)
+    +code : String = Curl.code(Push.ran(r))
+    Push.rm(cfg)
+    Push.rm(file)
+    Push.rm(out)
+    IO.print_err("backplane: push webhook -> " ++ code)
+    return Unit{}
+
+def Push.hook.act(mode: Nat, +home: String, +st: M.State, +thread: String, +kind: String, +state: String, +url: String, +secret: String) -> IO(Unit):
+  match mode:
+    case 0n:
+      IO.print_err("backplane: push webhook: push.webhook.secret could not be read")
+    case _:
+      Push.hook.post(home, st, thread, kind, state, url, secret)
+
+def Push.hook.send(+home: String, +st: M.State, +thread: String, +kind: String, +state: String, +url: String) -> IO(Unit):
+  do IO<Unit>:
+    +set : String = M.Setting.get(st, WN.Wn.secret.key(), "")
+    +text : String <- Push.hook.read(WN.Wn.path(home, set))
+    Push.hook.act(WN.Wn.mode(WN.Wn.asked(set), text), home, st, thread, kind, state, url, text)
+
+def Push.hook.bad() -> IO(Unit):
+  IO.print_err("backplane: push webhook: push.webhook.url is not an http address")
+
+def Push.hook.skip() -> IO(Unit):
+  IO.pure(Unit, Unit{})
+
+def Push.hook.go(ok: Bool, +home: String, +st: M.State, +thread: String, +kind: String, +state: String, +url: String) -> IO(Unit):
+  match ok:
+    case True{}:
+      Push.hook.send(home, st, thread, kind, state, url)
+    case False{}:
+      Push.hook.bad()
+
+def Push.hook.k(set: Bool, +home: String, +st: M.State, +thread: String, +kind: String, +state: String, +url: String) -> IO(Unit):
+  match set:
+    case False{}:
+      Push.hook.skip()
+    case True{}:
+      Push.hook.go(WN.Wn.url.ok(url), home, st, thread, kind, state, url)
+
+# `kind` is the alert the notice is for; `state` is the turn's end:
+# "completed", "failed", "interrupted" or "stopped", or the thread's turn
+# when the notice is not a turn end
+def Push.hook(+home: String, +st: M.State, +thread: String, +kind: String, +state: String) -> IO(Unit):
+  do IO<Unit>:
+    +url : String = String.trim(M.Setting.get(st, WN.Wn.url.key(), ""))
+    Push.hook.k(WN.Wn.on(url), home, st, thread, kind, state, url)
+
+def Push.hook.when(go: Bool, +home: String, +st: M.State, +thread: String, +kind: String, +state: String) -> IO(Unit):
+  match go:
+    case True{}:
+      Push.hook(home, st, thread, kind, state)
+    case False{}:
+      Push.hook.skip()
+
+# a settle or a failure, from TurnEnded, when the policy raised one; and a
+# turn that failed (an error, a limit) or was cut off, as a failure,
+# whenever notify.settled would tell of one (wnote.bend's Wn.due.end)
+def Push.hook.turn.k(+kind: String, +home: String, +st: M.State, +thread: String, +state: String) -> IO(Unit):
+  Push.hook.when(WN.Wn.due.end(kind, state, NO.Policy.on(st, "settled")), home, st, thread, WN.Wn.end.kind(kind, state), state)
+
+def Push.hook.turn(+home: String, +st: M.State, +thread: String, +state: String) -> IO(Unit):
+  Push.hook.turn.k(Push.hook.kind(st, thread), home, st, thread, state)
+
+# an ask, a merge, a reminder or a note, from Alerted (a settle is left to TurnEnded)
+def Push.hook.alert(+home: String, +st: M.State, +thread: String) -> IO(Unit):
+  Push.hook.when(WN.Wn.due.alert(Push.hook.kind(st, thread)), home, st, thread, Push.hook.kind(st, thread), WN.Wn.outcome(M.Thread.turn(B.Hub.thread(st, thread))))
+
+# the island push for a turn that ended; answers the tokens APNs reported dead.
+# the webhook runs after it and cannot drop the tokens it found
+def Push.turn_ended.dead(+home: String, +st: M.State, +thread: String, +state: String) -> IO(List<&2, String>):
+  do IO<List<&2, String>>:
+    dead : List<&2, String> <- Push.start(home, st, thread, M.Setting.get(st, "push.apns.key", ""), M.Setting.get(st, "push.apns.keyid", ""), M.Setting.get(st, "push.apns.team", ""))
+    Push.hook.turn(home, st, thread, state)
+    return dead
 
 # the request that forgets a dead token (for the hub's inbox, as a client
 # request would; the reply goes to no one)
@@ -588,8 +737,8 @@ def Push.turn_ended.done(dead: List<&2, String>) -> IO(Unit):
 
 # without the hub's inbox: dead tokens are found but not dropped (the hub
 # calls Push.turn_ended.dead and posts Push.drop_request for each)
-def Push.turn_ended(+home: String, st: M.State, +thread: String) -> IO(Unit):
-  IO.bind(List<&2, String>, Unit, Push.turn_ended.dead(home, st, thread), Push.turn_ended.done)
+def Push.turn_ended(+home: String, st: M.State, +thread: String, +state: String) -> IO(Unit):
+  IO.bind(List<&2, String>, Unit, Push.turn_ended.dead(home, st, thread, state), Push.turn_ended.done)
 
 # (a far turn's end is an alert only: each hub's Live Activity is its own
 # threads', so this hub never ends or rewrites it for another's)
