@@ -25,6 +25,10 @@
 {
   lib,
   stdenv,
+  runtimeShellPackage,
+  coreutils,
+  curl,
+  openssl,
   bend,
   python3,
   autoPatchelfHook,
@@ -100,7 +104,7 @@
     if builtins.match "[0-9a-f]{40}" commit != null
     then commit
     else "";
-  # @out@ and @libPath@ are filled in during install. A toFile result must
+  # @out@, @libPath@ and @shPath@ are filled in during install. A toFile result must
   # not mention a derivation, and ''${LD_LIBRARY_PATH:-} must survive `set -u`.
   wrapperFor = name:
     builtins.toFile "backplane-src-${name}-wrapper" ''
@@ -112,6 +116,10 @@
       else
         export LD_LIBRARY_PATH=@libPath@
       fi
+      # The hub runs project.add and the fs.* jobs through `env sh`, and
+      # push webhooks through openssl and curl. systemd units often have
+      # none of these on PATH. Appended, so the caller's own tools win.
+      export PATH="''${PATH:+$PATH:}@shPath@"
       exec @out@/libexec/backplane/${name} "$@"
     '';
 in
@@ -227,8 +235,9 @@ in
       test -s "$libexec/kistack/.claude-plugin/plugin.json"
       test -f "$libexec/kistack/skills/pcb/SKILL.md"
       test "$(tr -d '\n' < "$libexec/kistack/REVISION")" = "${sources.kistackRevision}"
-      substitute ${wrapperFor "backplane"} "$out/bin/backplane" --subst-var out --subst-var libPath
-      substitute ${wrapperFor "backplane-serve"} "$out/bin/backplane-serve" --subst-var out --subst-var libPath
+      shPath=${lib.makeBinPath [runtimeShellPackage coreutils curl openssl]}
+      substitute ${wrapperFor "backplane"} "$out/bin/backplane" --subst-var out --subst-var libPath --subst-var shPath
+      substitute ${wrapperFor "backplane-serve"} "$out/bin/backplane-serve" --subst-var out --subst-var libPath --subst-var shPath
       chmod 755 "$out/bin/backplane" "$out/bin/backplane-serve"
       runHook postInstall
     '';
