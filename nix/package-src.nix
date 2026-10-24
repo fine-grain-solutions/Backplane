@@ -1,63 +1,45 @@
-# Backplane built from this checkout, with the same scripts a release uses
+# Backplane built from this checkout, with the same script a release uses
 # (scripts/build.sh): the web client, backplane-serve, the launcher, and
 # KiStack. backplane-kipc is built too (its npm dependencies are fetched
 # ahead of time). backplane-browser and backplane-step2glb are not: those
 # pull Playwright and OpenCascade, and the hub runs without them.
 #
-# The native emitter is scripts/native-compiler.py. It refuses to run
-# without Bun and otherwise downloads Bend 2.0.36. Both are supplied here:
-# baseline Bun from nix/bend.nix, and the codeload archive whose SHA-256
-# that script pins, staged into the cache the script already knows how to
-# reuse. KiStack is the same fetchFromGitHub pin as nix/package.nix
-# (nix/sources.nix); build-kistack.sh only curls when that tarball is absent.
+# Since upstream's "No C build at all" (32750a4a), the hub is JS on Bun's
+# runtime: bend only emits JS (scripts/build-js.sh), there is no
+# scripts/native-compiler.py, no C compiler, and dist/backplane is no
+# longer a compiled window binary but deploy/backplane-launch.sh, a shell
+# launcher that execs backplane-serve (or opens a desktop app / browser tab
+# when one is available, neither of which this package installs). The hub
+# itself only dlopens libc at run time (src/server/effects/*.js), so no
+# X11/ALSA/fontconfig runtime libraries are needed any more; autoPatchelf
+# still wires up whatever the Bun-compiled executables actually NEED
+# (glibc, libstdc++).
 #
-# No Google sign-in (BACKPLANE_GOOGLE_BAKE=0). The laws job is not rerun
-# (BACKPLANE_SKIP_CHECK=1). Emit peaks near 8 GB.
+# KiStack is the same fetchFromGitHub pin as nix/package.nix (nix/sources.nix);
+# build-kistack.sh only curls when that tarball is absent.
+#
+# No Google sign-in (BACKPLANE_GOOGLE_BAKE=0), no telemetry baked in. The
+# laws job is not rerun (BACKPLANE_SKIP_CHECK=1). BACKPLANE_EMIT_CACHE=0
+# skips build-js.sh's emit cache, which otherwise keys on `git ls-files`
+# (there is no git history inside the sandboxed source). Emit peaks near 8 GB.
 {
   lib,
   stdenv,
-  llvmPackages_19,
   bend,
   python3,
-  patch,
-  git,
-  procps,
-  cacert,
-  unzip,
   autoPatchelfHook,
-  fetchurl,
   fetchFromGitHub,
   writeShellScriptBin,
-  writeText,
-  libx11,
-  libxcb,
-  libxau,
-  libxdmcp,
-  alsa-lib,
-  freetype,
-  fontconfig,
+  cacert,
+  unzip,
   src,
   version,
   commit ? "",
-  jobs ? 2,
   sources ? import ./sources.nix,
 }: let
-  runtimeLibs = [
-    freetype
-    fontconfig
-    libx11
-    libxcb
-    libxau
-    libxdmcp
-    alsa-lib
-  ];
+  runtimeLibs = [stdenv.cc.cc.lib];
   libPath = lib.makeLibraryPath runtimeLibs;
   bun = bend.passthru.bun-baseline;
-  # scripts/native-compiler.py SOURCE_SHA256 for the codeload tag archive.
-  bendArchive = fetchurl {
-    url = "https://codeload.github.com/bendlang/bend/tar.gz/refs/tags/v2.0.36";
-    hash = "sha256-y81vS3WJegUGWHLvrJuNQ1laRnEYMxRh6xuSQpueFok=";
-  };
   kistackSrc = fetchFromGitHub {
     owner = sources.kistackOwner;
     repo = sources.kistackRepo;
@@ -103,7 +85,7 @@
   };
   # `bun install` in the sandbox has no network. Dependencies are already
   # in tools/kipc/node_modules. Every other invocation is the real binary
-  # (the native emitter, `bun build`, `bun --version`).
+  # (bend's emit on Bun, `bun build`, `bun --version`).
   bunWrap = writeShellScriptBin "bun" ''
     if [ "''${1:-}" = "install" ]; then
       if [ -d node_modules ]; then
@@ -118,18 +100,6 @@
     if builtins.match "[0-9a-f]{40}" commit != null
     then commit
     else "";
-  prepareCompiler = writeText "prepare-compiler.py" ''
-    import importlib.util
-    import os
-    from pathlib import Path
-    path = Path("scripts/native-compiler.py").resolve()
-    spec = importlib.util.spec_from_file_location("native_compiler", path)
-    mod = importlib.util.module_from_spec(spec)
-    mod.__file__ = str(path)
-    spec.loader.exec_module(mod)
-    cache = Path(os.environ["XDG_CACHE_HOME"]) / "backplane-bend/compiler"
-    mod.prepare(cache, archive=Path(os.environ["BEND_SOURCE_ARCHIVE"]))
-  '';
   # @out@ and @libPath@ are filled in during install. A toFile result must
   # not mention a derivation, and ''${LD_LIBRARY_PATH:-} must survive `set -u`.
   wrapperFor = name:
@@ -145,7 +115,7 @@
       exec @out@/libexec/backplane/${name} "$@"
     '';
 in
-  llvmPackages_19.stdenv.mkDerivation {
+  stdenv.mkDerivation {
     pname = "backplane-src";
     inherit version src;
 
@@ -153,9 +123,6 @@ in
       bend
       bunWrap
       python3
-      patch
-      git
-      procps
       autoPatchelfHook
     ];
     buildInputs = runtimeLibs;
@@ -175,9 +142,6 @@ in
       export HOME=$TMPDIR/home
       export XDG_CACHE_HOME=$TMPDIR/cache
       mkdir -p "$HOME" "$XDG_CACHE_HOME"
-      # build-app.sh asks git where .env lives. An empty repo answers, and
-      # there is no .env (BACKPLANE_GOOGLE_BAKE=0).
-      git init -q
 
       mkdir -p "$XDG_CACHE_HOME/backplane-bend/kistack-src"
       # Store paths are mode 0555. build-kistack.sh extracts this tarball
@@ -190,9 +154,6 @@ in
         "$XDG_CACHE_HOME/backplane-bend/kistack-src/${sources.kistackRevision}.tar.gz" \
         src
 
-      export BEND_SOURCE_ARCHIVE=${bendArchive}
-      python3 ${prepareCompiler}
-
       rm -rf tools/kipc/node_modules
       cp -a ${kipcDeps}/node_modules tools/kipc/node_modules
 
@@ -201,19 +162,18 @@ in
       printf '%s\n' '#!/bin/sh' 'echo "backplane-src: skipping backplane-browser"' > scripts/build-browser.sh
       printf '%s\n' '#!/bin/sh' 'echo "backplane-src: skipping backplane-step2glb"' > scripts/build-step2glb.sh
       chmod +x scripts/build-browser.sh scripts/build-step2glb.sh
-      patchShebangs scripts
+      # Only these two stubs need their shebang patched: patching the whole
+      # scripts/ tree would rewrite scripts/bend-closure.py's interpreter
+      # line and change its sha256, which sidebar-draft-guard.py pins.
+      patchShebangs scripts/build-browser.sh scripts/build-step2glb.sh
 
-      export CC=clang
       export BACKPLANE_VERSION=v${version}
       export BACKPLANE_GOOGLE_BAKE=0
       export BACKPLANE_SKIP_CHECK=1
-      export BACKPLANE_OBJ_CACHE=0
+      # build-js.sh's emit cache keys on `git ls-files`; there is no git
+      # history in the sandboxed source, so skip the cache rather than fail.
       export BACKPLANE_EMIT_CACHE=0
-      export BACKPLANE_EMIT_REMOTE=0
-      export BACKPLANE_CPUS=""
-      export BACKPLANE_JOBS=${toString jobs}
-      export BP_BUILD_LOCKED=1
-      # 8 GiB. build-app.sh keeps a value that is already set.
+      # 8 GiB. build-js.sh keeps a value that is already set.
       export BUN_JSC_forceRAMSize=8589934592
       export BEND_NO_TELEMETRY=1
       ${lib.optionalString (commitStamp != "") ''
@@ -273,11 +233,11 @@ in
       runHook postInstall
     '';
 
-    # autoPatchelf records NEEDED libraries. Append the dlopen directories
-    # as well. The launcher is a shell script (deploy/backplane-launch.sh),
-    # so patchelf only the ELF binaries.
+    # autoPatchelf records NEEDED libraries. The launcher (dist/backplane)
+    # is deploy/backplane-launch.sh, a shell script, so patchelf only the
+    # ELF binaries: backplane-serve and the host helpers.
     postFixup = ''
-      for b in backplane backplane-serve backplane-kipc backplane-voice; do
+      for b in backplane-serve backplane-kipc backplane-voice; do
         bin="$out/libexec/backplane/$b"
         [ -e "$bin" ] || continue
         if ! old=$(patchelf --print-rpath "$bin" 2>/dev/null); then
@@ -299,11 +259,13 @@ in
       description = "Backplane built from this checkout";
       longDescription = ''
         Hub, launcher and web client compiled from the flake's own sources
-        with scripts/build.sh. KiStack is the revision in nix/sources.nix,
-        installed at libexec/backplane/kistack beside the binary. The package
-        sets BACKPLANE_NO_UPDATE. Google sign-in is not baked in.
-        backplane-kipc is included. backplane-browser and backplane-step2glb
-        are not.
+        with scripts/build.sh (the hub is JS on Bun's runtime, no C build).
+        KiStack is the revision in nix/sources.nix, installed at
+        libexec/backplane/kistack beside the binary. The package sets
+        BACKPLANE_NO_UPDATE. Google sign-in is not baked in. backplane-kipc
+        is included. backplane-browser and backplane-step2glb are not, and
+        there is no desktop app binary (dist/backplane is the upstream
+        launcher script, which falls back to the hub when none is installed).
       '';
       homepage = "https://github.com/i2cjak/Backplane";
       license = lib.licenses.mit;
