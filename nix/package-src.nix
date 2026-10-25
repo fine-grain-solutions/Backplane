@@ -44,11 +44,29 @@
   runtimeLibs = [stdenv.cc.cc.lib];
   libPath = lib.makeLibraryPath runtimeLibs;
   bun = bend.passthru.bun-baseline;
+  # The source build follows the tree's own deploy/kistack.lock, which
+  # upstream bumps independently of the release pin in sources.nix
+  # (scripts/build-kistack.sh would otherwise curl inside the sandbox).
+  kistackLock = builtins.readFile (src + "/deploy/kistack.lock");
+  kistackRevision = let
+    revs = map (lib.removePrefix "rev ") (lib.filter (lib.hasPrefix "rev ") (lib.splitString "\n" kistackLock));
+  in
+    if revs == []
+    then throw "backplane-src: no rev in deploy/kistack.lock"
+    else builtins.head revs;
+  # Unpacked fetchFromGitHub hashes of KiStack revisions deploy/kistack.lock
+  # has named. Add one when upstream bumps the lock.
+  kistackHashes = {
+    ${sources.kistackRevision} = sources.kistackHash;
+    "92c0bccb130c7b68966d17539e65c0026af95eb4" = "sha256-iFVIuttDzslwMg5nKDuFyny8lXluwpp1heeim/tQ4Ro=";
+  };
   kistackSrc = fetchFromGitHub {
     owner = sources.kistackOwner;
     repo = sources.kistackRepo;
-    rev = sources.kistackRevision;
-    hash = sources.kistackHash;
+    rev = kistackRevision;
+    hash =
+      kistackHashes.${kistackRevision}
+      or (throw "backplane-src: add KiStack ${kistackRevision}'s hash to kistackHashes in nix/package-src.nix");
   };
   kipcManifest = builtins.path {
     name = "kipc-manifest";
@@ -159,7 +177,7 @@ in
       cp -a ${kistackSrc} "$kistackStage/src"
       chmod -R u+w "$kistackStage/src"
       tar -C "$kistackStage" -czf \
-        "$XDG_CACHE_HOME/backplane-bend/kistack-src/${sources.kistackRevision}.tar.gz" \
+        "$XDG_CACHE_HOME/backplane-bend/kistack-src/${kistackRevision}.tar.gz" \
         src
 
       rm -rf tools/kipc/node_modules
@@ -234,7 +252,7 @@ in
       test -s "$libexec/web/index.html"
       test -s "$libexec/kistack/.claude-plugin/plugin.json"
       test -f "$libexec/kistack/skills/pcb/SKILL.md"
-      test "$(tr -d '\n' < "$libexec/kistack/REVISION")" = "${sources.kistackRevision}"
+      test "$(tr -d '\n' < "$libexec/kistack/REVISION")" = "${kistackRevision}"
       shPath=${lib.makeBinPath [runtimeShellPackage coreutils curl openssl]}
       substitute ${wrapperFor "backplane"} "$out/bin/backplane" --subst-var out --subst-var libPath --subst-var shPath
       substitute ${wrapperFor "backplane-serve"} "$out/bin/backplane-serve" --subst-var out --subst-var libPath --subst-var shPath
