@@ -33,6 +33,7 @@
   python3,
   autoPatchelfHook,
   fetchFromGitHub,
+  fetchurl,
   writeShellScriptBin,
   cacert,
   unzip,
@@ -59,6 +60,16 @@
   kistackHashes = {
     ${sources.kistackRevision} = sources.kistackHash;
     "92c0bccb130c7b68966d17539e65c0026af95eb4" = "sha256-iFVIuttDzslwMg5nKDuFyny8lXluwpp1heeim/tQ4Ro=";
+    "641ade9041bb0844c4530dfff11010eef30919af" = "sha256-zIVAUB0GLTNaipt8SLgFhFC5oWGQ/1yFEwprDWDUw1g=";
+  };
+  # The KiCad library build-js.sh embeds (upstream #456). The url, sha256
+  # and size come from the tree's own deploy/kicad-library.lock.json, so a
+  # bump needs no change here. scripts/kicad-library-header.py reads
+  # $XDG_CACHE_HOME/backplane-bend/kicad-library/<sha256>.tar.gz before
+  # it would urlopen, and verifies it against the same pin either way.
+  kicadLibraryLock = builtins.fromJSON (builtins.readFile (src + "/deploy/kicad-library.lock.json"));
+  kicadLibrary = fetchurl {
+    inherit (kicadLibraryLock) url sha256;
   };
   kistackSrc = fetchFromGitHub {
     owner = sources.kistackOwner;
@@ -180,6 +191,10 @@ in
         "$XDG_CACHE_HOME/backplane-bend/kistack-src/${kistackRevision}.tar.gz" \
         src
 
+      mkdir -p "$XDG_CACHE_HOME/backplane-bend/kicad-library"
+      cp ${kicadLibrary} \
+        "$XDG_CACHE_HOME/backplane-bend/kicad-library/${kicadLibraryLock.sha256}.tar.gz"
+
       rm -rf tools/kipc/node_modules
       cp -a ${kipcDeps}/node_modules tools/kipc/node_modules
 
@@ -279,7 +294,7 @@ in
     '';
 
     passthru = {
-      inherit sources kistackSrc kipcDeps;
+      inherit sources kistackSrc kipcDeps kicadLibrary;
     };
 
     meta = {
