@@ -123,7 +123,7 @@ refs/backplane/checkpoints/<b64url(thread_id)>/turn/<n>
 
 - Turn 0 is the state before the first turn. Capture it when the thread starts, then capture turn n after each turn.
 - Each checkpoint is a commit object:
-  - authored by `Backplane <backplane@localhost>` and unsigned;
+  - authored and committed as the repo's git identity (`user.name` and `user.email` from repo, global or system config), falling back to `Backplane <backplane@localhost>` when either is unset, and unsigned;
   - its parent is turn n−1 when that checkpoint exists;
   - it is pointed to only by its hidden ref, so no branch moves and no commit lands on the user's branch.
 
