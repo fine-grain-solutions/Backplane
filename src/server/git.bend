@@ -552,11 +552,19 @@ def Git.parents(r: P.Ran) -> List<&2, String>:
     case P.Ran{+code, out}:
       Bool.pick(List<&2, String>, U32.is_eq(code, 0), ["-p", String.trim(out)], Nil{})
 
+# the shell words that read the repo's git identity (repo, global or system
+# config) into $n and $e, and the env prefix that authors and commits as it,
+# falling back to Backplane <backplane@localhost> when either is unset
+def Git.who.read() -> String:
+  "n=$(git config user.name); e=$(git config user.email)"
+
+def Git.who.env() -> String:
+  "GIT_AUTHOR_NAME=\"${n:-Backplane}\" GIT_AUTHOR_EMAIL=\"${e:-backplane@localhost}\" GIT_COMMITTER_NAME=\"${n:-Backplane}\" GIT_COMMITTER_EMAIL=\"${e:-backplane@localhost}\""
+
 def Git.commit_tree(cwd: String, tree: String, parents: List<&2, String>, msg: String) -> IO(P.Ran):
-  P.Proc.run("env", List.append(&2, String,
-    ["GIT_AUTHOR_NAME=Backplane", "GIT_AUTHOR_EMAIL=backplane@localhost",
-     "GIT_COMMITTER_NAME=Backplane", "GIT_COMMITTER_EMAIL=backplane@localhost",
-     "git", "commit-tree", "--no-gpg-sign", "-m", msg, tree], parents), cwd)
+  P.Proc.run("sh", List.append(&2, String,
+    ["-c", Git.who.read() ++ "; " ++ Git.who.env() ++ " exec git commit-tree --no-gpg-sign \"$@\"",
+     "sh", "-m", msg, tree], parents), cwd)
 
 def Git.capture.k(+cwd: String, +r: String, +tree: String, prev: P.Ran, msg: String) -> IO(String):
   Git.seq(Git.commit_tree(cwd, tree, Git.parents(prev), msg), +sha =>
@@ -702,7 +710,8 @@ def Git.step.script() -> String:
     "else",
     "  [ \"$tree\" = \"$(git hash-object -t tree /dev/null)\" ] && exit 0",
     "fi",
-    "c=$(GIT_AUTHOR_NAME=Backplane GIT_AUTHOR_EMAIL=backplane@localhost GIT_COMMITTER_NAME=Backplane GIT_COMMITTER_EMAIL=backplane@localhost git commit-tree --no-gpg-sign -m \"backplane step\" ${prev:+-p \"$prev\"} \"$tree\") || exit 0",
+    Git.who.read(),
+    "c=$(" ++ Git.who.env() ++ " git commit-tree --no-gpg-sign -m \"backplane step\" ${prev:+-p \"$prev\"} \"$tree\") || exit 0",
     "if [ -n \"$prev\" ]; then git update-ref \"$ref\" \"$c\" \"$prev\" || exit 0",
     "else printf 'create %s %s\\n' \"$ref\" \"$c\" | git update-ref --stdin || exit 0; fi",
     "printf '%s\\n%s\\n%s\\n%s\\n' \"$c\" \"$prev\" \"$gd\" \"$top\"",
