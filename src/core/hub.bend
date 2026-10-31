@@ -9200,7 +9200,7 @@ def Fallback.limited.k(+s: M.State, +now: Nat, +th: String, +lim: FB.Limit) -> S
   +cs = {List.append(&2, M.Change,
     Bool.pick(List<&2, M.Change>, FB.Limit.active(s, FB.Limit.scope(lim), now), Nil{}, [M.SettingSet{FB.Limit.key(FB.Limit.scope(lim)), FB.Limit.json(lim, now), now}]),
     [M.SettingSet{"fallback.pending." ++ th, "", now}, M.SettingSet{"fallback.continuing." ++ th, "yes", now}, M.TurnChanged{th, M.Interrupted{}, now}, M.QueueTaken{th, now}, M.TurnChanged{th, M.Running{}, now}]) : List<&2, M.Change>}
-  Step{cs, AgentStop{th} <> Hub.run(Hub.thread(s, th), Hub.cwd(s, Hub.thread(s, th)), M.Queue.join(Fallback.continue(s, th), M.Queue.of(s, th)), Hub.uuid(now, th ++ "/fallback/" ++ Nat.show(Hub.seq(s))))}
+  Step{cs, AgentStop{th} <> List.append(&2, Out, Bg.stop.outs(s, th, Hub.id("b", now, Hub.seq(s))), Hub.run(Hub.thread(s, th), Hub.cwd(s, Hub.thread(s, th)), M.Queue.join(Fallback.continue(s, th), M.Queue.of(s, th)), Hub.uuid(now, th ++ "/fallback/" ++ Nat.show(Hub.seq(s)))))}
 
 def Fallback.limited(+s: M.State, +now: Nat, +th: String, +lim: FB.Limit) -> Step:
   Fallback.limited.k(s, now, th, Reset.fill(s, now, lim))
@@ -9218,7 +9218,7 @@ def ProviderResume.hold.k(+s: M.State, +now: Nat, +th: String, +lim: FB.Limit, n
   Step{List.append(&2, M.Change, ProviderResume.mark(s, now, th, lim),
     [M.TurnChanged{th, M.Interrupted{}, now}, M.SettingSet{"fallback.pending." ++ th, "", now},
       M.ActivityLogged{th, Hub.id("quota", now, Hub.seq(s)), "warn", "provider-wait", "Provider limit reached; " ++
-        Bool.pick(String, Nat.is_gt(FB.Limit.reset(lim), now), "will continue when the reported reset arrives.", "no future reset supplied; waiting for updated provider evidence or your action."), now}]), [ToolsGone{th}]}
+        Bool.pick(String, Nat.is_gt(FB.Limit.reset(lim), now), "will continue when the reported reset arrives.", "no future reset supplied; waiting for updated provider evidence or your action."), now}]), ToolsGone{th} <> Bg.stop.outs(s, th, Hub.id("b", now, Hub.seq(s)))}
 
 def ProviderResume.hold(+s: M.State, +now: Nat, +th: String, +lim: FB.Limit, normal: Step) -> Step:
   ProviderResume.hold.k(s, now, th, Reset.fill(s, now, lim), normal)
