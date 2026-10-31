@@ -1,8 +1,11 @@
 # Backplane built from this checkout, with the same script a release uses
 # (scripts/build.sh): the web client, backplane-serve, the launcher, and
 # KiStack. backplane-kipc is built too (its npm dependencies are fetched
-# ahead of time). backplane-browser and backplane-step2glb are not: those
-# pull Playwright and OpenCascade, and the hub runs without them.
+# ahead of time), and so are tools/viewer's: scripts/build.sh runs
+# scripts/build-viewer.sh for the web client's pinned renderer/worker
+# assets, which also does its own `bun install`. backplane-browser and
+# backplane-step2glb are not: those pull Playwright and OpenCascade, and
+# the hub runs without them.
 #
 # Since upstream's "No C build at all" (32750a4a), the hub is JS on Bun's
 # runtime: bend only emits JS (scripts/build-js.sh), there is no
@@ -116,9 +119,48 @@
       runHook postInstall
     '';
   };
+  viewerManifest = builtins.path {
+    name = "viewer-manifest";
+    path = ../tools/viewer;
+    filter = path: type: let
+      base = baseNameOf path;
+    in
+      (type == "directory" && base != "node_modules")
+      || base == "package.json"
+      || base == "bun.lock";
+  };
+  # Same reasoning as kipcDeps: scripts/build-viewer.sh's own `bun install
+  # --frozen-lockfile --ignore-scripts` needs the network, so it is fetched
+  # here instead, in the one place the sandbox allows it.
+  viewerDeps = stdenv.mkDerivation {
+    pname = "backplane-viewer-deps";
+    version = "0";
+    src = viewerManifest;
+    nativeBuildInputs = [bun cacert unzip];
+    outputHashMode = "recursive";
+    outputHash = "sha256-QhglttyS/HPNsEaKHJvUdwvSQr6wxmNCCfI0tUE1mRM=";
+    dontConfigure = true;
+    dontStrip = true;
+    dontFixup = true;
+    buildPhase = ''
+      runHook preBuild
+      export HOME=$TMPDIR/home
+      export BUN_INSTALL_CACHE_DIR=$TMPDIR/bun-cache
+      mkdir -p "$HOME" "$BUN_INSTALL_CACHE_DIR"
+      bun install --frozen-lockfile --ignore-scripts
+      runHook postBuild
+    '';
+    installPhase = ''
+      runHook preInstall
+      mkdir -p $out
+      cp -a node_modules $out/node_modules
+      runHook postInstall
+    '';
+  };
   # `bun install` in the sandbox has no network. Dependencies are already
-  # in tools/kipc/node_modules. Every other invocation is the real binary
-  # (bend's emit on Bun, `bun build`, `bun --version`).
+  # in tools/kipc/node_modules and tools/viewer/node_modules. Every other
+  # invocation is the real binary (bend's emit on Bun, `bun build`, `bun
+  # --version`).
   bunWrap = writeShellScriptBin "bun" ''
     if [ "''${1:-}" = "install" ]; then
       if [ -d node_modules ]; then
@@ -197,6 +239,9 @@ in
 
       rm -rf tools/kipc/node_modules
       cp -a ${kipcDeps}/node_modules tools/kipc/node_modules
+
+      rm -rf tools/viewer/node_modules
+      cp -a ${viewerDeps}/node_modules tools/viewer/node_modules
 
       # The hub runs without these. Their installs are Playwright and
       # OpenCascade, which this package does not fetch.
@@ -294,7 +339,7 @@ in
     '';
 
     passthru = {
-      inherit sources kistackSrc kipcDeps kicadLibrary;
+      inherit sources kistackSrc kipcDeps viewerDeps kicadLibrary;
     };
 
     meta = {
