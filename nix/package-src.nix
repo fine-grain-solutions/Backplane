@@ -100,7 +100,7 @@
     src = kipcManifest;
     nativeBuildInputs = [bun cacert unzip];
     outputHashMode = "recursive";
-    outputHash = "sha256-x0aftVlV8EoVhFDyXOLCu8pbmfatGMtJRVePZFApuMM=";
+    outputHash = "sha256-7lDJpu6+R8buZY2GOIWkXa5iV9rtmsx1m5qYkN5IFZA=";
     dontConfigure = true;
     dontStrip = true;
     dontFixup = true;
