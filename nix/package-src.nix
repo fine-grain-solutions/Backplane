@@ -253,6 +253,44 @@ in
       # line and change its sha256, which sidebar-draft-guard.py pins.
       patchShebangs scripts/build-browser.sh scripts/build-step2glb.sh
 
+      # heavy-guard.py serializes bend/bun jobs against the host's real RAM
+      # (and, failing that, a cgroup cap or a Boat offload) so concurrent
+      # heavy jobs on a shared machine don't OOM it. The Nix build sandbox
+      # already isolates this build (its own allocation, no sibling heavy
+      # jobs sharing the host, no network), so Boat is not reachable from
+      # inside it: that admission/offload logic would only ever misfire or
+      # hang here. Every scripts/build-js.sh heavy_guard call site is left
+      # as-is; this stand-in makes the guard itself a no-op: a `--held`
+      # probe (scripts/heavy-guard.sh's nested check) reports itself already
+      # admitted, so heavy_guard() returns and build-js.sh just carries on
+      # in place, and a bare "PROFILE -- CMD ARGS..." (scripts/heavy,
+      # scripts/heavy-command.sh) execs CMD ARGS directly with no lock,
+      # cgroup check or Boat offload. heavy-guard.py is not part of
+      # sidebar-draft-guard.py's pinned manifest (scripts/sidebar-draft-inputs.json
+      # lists only .bend files under "files"), so replacing it here does not
+      # disturb that guard, which build-js.sh still runs for real beforehand.
+      cat > scripts/heavy-guard.py <<'HEAVY_GUARD_STUB'
+#!/usr/bin/env python3
+"""Nix build stand-in for scripts/heavy-guard.py: no admission, no
+cgroup/memory checks, no Boat offload. See nix/package-src.nix."""
+import os
+import sys
+
+
+def main(argv):
+    if argv and argv[0] == '--held':
+        return 0
+    if len(argv) >= 2 and argv[1] == '--' and argv[2:]:
+        os.execvp(argv[2], argv[2:])
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main(sys.argv[1:]))
+HEAVY_GUARD_STUB
+      chmod +x scripts/heavy-guard.py
+      patchShebangs scripts/heavy-guard.py
+
       export BACKPLANE_VERSION=v${version}
       export BACKPLANE_GOOGLE_BAKE=0
       export BACKPLANE_SKIP_CHECK=1
